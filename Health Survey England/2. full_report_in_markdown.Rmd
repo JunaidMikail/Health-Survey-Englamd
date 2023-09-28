@@ -1,0 +1,426 @@
+---
+title: "Impact of education level on mental health pre & post recesson"
+author: "X"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    theme: paper
+    number_sections: no
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(gmodels)
+all_years <- read.csv("allyears.csv") %>%
+  select(-c(genhelf2, pserial, SerialA, Seriala, econact, X, Weight, topqual3)) %>%
+  mutate(post_2008_indicator = ifelse(year<2009, 0, 1),
+    Int_Weight = ifelse(is.na(Int_Weight), 1,Int_Weight),
+    Age = recode(factor(Age), 
+                      `16-24` = "16-34", `25-34` = "16-34",
+                      `35-44` = "35-54", `45-54` = "35-54"),
+         #GHQ36Scr = GHQ36Scr*Int_Weight,
+         #EQMEAN = EQMEAN*Int_Weight,
+    Employment_Status = fct_recode(Employment_Status, `Long-term sick/long-term sick or retired` = "Retired")) %>%
+  mutate(post_2008_indicator = fct_recode(factor(post_2008_indicator), `Post recession` = "1" , `Pre recession` = "0"),
+         year = factor(year))
+
+
+```
+
+# Descriptive Statistics
+
+## Proportion of respondents by employment category (2000 - 2019)
+
+```{r, echo = F}
+all_years %>%
+  group_by(year, Employment_Status) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(year) %>%
+  mutate(proportion = count / sum(count)) -> d1_df
+
+  ggplot(d1_df, aes(x = year, y = proportion, color = Employment_Status, group = Employment_Status)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Survey year", y = "Proportion of sample", color = "Employment status") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Objective 1
+
+In this section, we explore the trend of mental health between 2000-2019 between the different employment categories.
+
+## Prevalence of mental health caseness by employment status 
+
+```{r, echo=FALSE}
+respondents_by_year_econact_ghq2 <- all_years %>% group_by(year, Employment_Status, GHQg2) %>% summarise(respondents_by_yr_ec_ghq2 = n())
+respondents_by_year_and_econact <- all_years %>% group_by(year, Employment_Status) %>% summarise(respondents_by_econact = n())
+
+ghq2_prop <- respondents_by_year_econact_ghq2 %>% 
+  left_join(respondents_by_year_and_econact, by = c("year", "Employment_Status")) %>%
+  mutate(prop_by_case  = respondents_by_yr_ec_ghq2/respondents_by_econact) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+
+x <- all_years %>% group_by(year, GHQg2) %>% summarise(respondents_by_yr_ghq2 = n())
+y <- all_years %>% group_by(year) %>% summarise(respondents_by_year = n())
+
+total_ghq2_prop <- x %>% 
+  left_join(y, by = "year") %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ghq2/respondents_by_year),4)*100)
+
+total_line <- total_ghq2_prop %>% filter(GHQg2 == "Case Mental Health") %>% select(year, prop_by_case)
+
+  
+  ggplot() +
+  geom_line(data = ghq2_prop, aes(x = year, y = prop_by_case, color = Employment_Status, group = Employment_Status)) +
+  geom_point() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Survey Year", y = "Proportion of caseness", title = "Until 2018, caseness of mental health\n was most prevalent in the 'long-term sick\n or retired category ") 
+
+wide_ghq2_prop <- ghq2_prop %>%
+  select(year, Employment_Status, prop_by_case) %>%
+  pivot_wider(names_from = "Employment_Status", values_from = "prop_by_case") %>%
+  left_join(total_line, by="year")
+  
+```
+
+## Unweighted GHQ36 by employment status
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(all_years, aes(x = Employment_Status, y = GHQ36Scr, fill = GHQ36Scr)) +
+  geom_boxplot() +
+  xlab("Employment Status") +
+  ylab("GHQ36") +
+  ggtitle("Boxplot of GHQ36 by Employment Status") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Unweighted EQMean by employment status
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(all_years, aes(x = Employment_Status, y = EQMEAN, fill = EQMEAN)) +
+  geom_boxplot() +
+  xlab("Employment Status") +
+  ylab("EQMEAN") +
+  ggtitle("Boxplot of EQMEAN by Employment Status") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## SRH by employment status
+
+```{r, echo=FALSE}
+ggplot(all_years, aes(x = Employment_Status, fill = Self_Rated_Health)) +
+  geom_bar(position = "fill") +
+  labs(x = "Employment Status", y = "Proportion", fill = "Self-Rated Health") +
+  ggtitle("Proportion of Self-Rated Health by Employment Status") +
+  coord_flip() +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+# Objective 2
+
+Our aim here is to assess the relationship between employment status and mental health in different population groups (gender, weight and education) pre and post recession.
+
+## Pre-recession (2008)
+
+### Distribution of general health questionnaire score by gender, education and age
+
+```{r, echo = F}
+all_years %>% 
+  filter(year == 2008) %>%
+  ggplot(aes(x = Employment_Status, y = (GHQ36Scr))) +
+  geom_boxplot() +
+  facet_wrap(~ Sex) +
+  xlab("Employment Status") +
+  ylab("General Health Questionnaire Score") +
+  ggtitle("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+all_years %>% 
+  filter(year == 2008) %>%
+  ggplot(aes(x = Employment_Status, y = (GHQ36Scr))) +
+  geom_boxplot() +
+  facet_wrap(~ Highest_Edu_Attain) +
+  xlab("Employment Status") +
+  ylab("General Health Questionnaire Score") +
+  ggtitle("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+all_years %>% 
+  filter(year == 2008) %>%
+  ggplot(aes(x = Employment_Status, y = (GHQ36Scr))) +
+  geom_boxplot() +
+  facet_wrap(~ Age) +
+  xlab("Employment Status") +
+  ylab("General Health Questionnaire Score") +
+  ggtitle("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### Proportion of caseness of mental health by gender, sex, age and educational attainment by employment status
+
+```{r, echo = F}
+
+obj2_df_l <- all_years %>% 
+  filter(year==2008) %>% 
+  group_by(Employment_Status, Sex, GHQg2) %>% 
+  summarise(respondents_by_yr_ec_ghq2 = n())
+
+obj2_df_s <- all_years %>% group_by(Employment_Status, Sex) %>% summarise(respondents_by_econact = n())
+
+obj2_df <- obj2_df_l %>% 
+  left_join(obj2_df_s, by = c("Employment_Status", "Sex")) %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ec_ghq2/respondents_by_econact * 100),2)) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+obj2_df %>%
+  ggplot(aes(x = Employment_Status, y = prop_by_case)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = prop_by_case), vjust = -0.5) +
+  facet_wrap(~ Sex) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "Proportion of mental health caseness (%)")
+```
+
+```{r, echo=F}
+obj2_df_l <- all_years %>% filter(year==2008) %>% group_by(Employment_Status, Age, GHQg2) %>% summarise(respondents_by_yr_ec_ghq2 = n())
+obj2_df_s <- all_years %>% group_by(Employment_Status, Age) %>% summarise(respondents_by_econact = n())
+
+obj2_df <- obj2_df_l %>% 
+  left_join(obj2_df_s, by = c("Employment_Status", "Age")) %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ec_ghq2/respondents_by_econact * 100),2)) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+obj2_df %>%
+  ggplot(aes(x = Employment_Status, y = prop_by_case)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = prop_by_case), vjust = -0.5) +
+  facet_wrap(~ Age) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "Proportion of mental health caseness (%)")
+```
+
+```{r, echo=FALSE}
+obj2_df_l <- all_years %>% filter(year==2008) %>% group_by(Employment_Status, Highest_Edu_Attain, GHQg2) %>% summarise(respondents_by_yr_ec_ghq2 = n())
+obj2_df_s <- all_years %>% group_by(Employment_Status, Highest_Edu_Attain) %>% summarise(respondents_by_econact = n())
+
+obj2_df <- obj2_df_l %>% 
+  left_join(obj2_df_s, by = c("Employment_Status", "Highest_Edu_Attain")) %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ec_ghq2/respondents_by_econact * 100),2)) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+obj2_df %>%
+  ggplot(aes(x = Employment_Status, y = prop_by_case)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = prop_by_case), vjust = -0.5) +
+  facet_wrap(~ Highest_Edu_Attain) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "Proportion of mental health caseness (%)")
+```
+
+
+## Post-recession (2009)
+
+### Distribution of general health questionnaire score by gender, education and age
+
+```{r, echo = F}
+all_years %>% 
+  filter(year == 2009) %>%
+  ggplot(aes(x = Employment_Status, y = (GHQ36Scr))) +
+  geom_boxplot() +
+  facet_wrap(~ Sex) +
+  xlab("Employment Status") +
+  ylab("General Health Questionnaire Score") +
+  ggtitle("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+all_years %>% 
+  filter(year == 2009) %>%
+  ggplot(aes(x = Employment_Status, y = (GHQ36Scr))) +
+  geom_boxplot() +
+  facet_wrap(~ Highest_Edu_Attain) +
+  xlab("Employment Status") +
+  ylab("General Health Questionnaire Score") +
+  ggtitle("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+all_years %>% 
+  filter(year == 2009) %>%
+  ggplot(aes(x = Employment_Status, y = (GHQ36Scr))) +
+  geom_boxplot() +
+  facet_wrap(~ Age) +
+  xlab("Employment Status") +
+  ylab("General Health Questionnaire Score") +
+  ggtitle("") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### Proportion of caseness of mental health by gender, sex, age and education by employment status
+
+```{r, echo = F}
+obj2_df_l <- all_years %>% filter(year==2009) %>% group_by(Employment_Status, Sex, GHQg2) %>% summarise(respondents_by_yr_ec_ghq2 = n())
+obj2_df_s <- all_years %>% group_by(Employment_Status, Sex) %>% summarise(respondents_by_econact = n())
+
+obj2_df <- obj2_df_l %>% 
+  left_join(obj2_df_s, by = c("Employment_Status", "Sex")) %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ec_ghq2/respondents_by_econact * 100),2)) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+obj2_df %>%
+  ggplot(aes(x = Employment_Status, y = prop_by_case)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = prop_by_case), vjust = -0.5) +
+  facet_wrap(~ Sex) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "Proportion of mental health caseness (%)")
+```
+
+```{r, echo=FALSE}
+obj2_df_l <- all_years %>% filter(year==2009) %>% group_by(Employment_Status, Age, GHQg2) %>% summarise(respondents_by_yr_ec_ghq2 = n())
+obj2_df_s <- all_years %>% group_by(Employment_Status, Age) %>% summarise(respondents_by_econact = n())
+
+obj2_df <- obj2_df_l %>% 
+  left_join(obj2_df_s, by = c("Employment_Status", "Age")) %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ec_ghq2/respondents_by_econact * 100),2)) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+obj2_df %>%
+  ggplot(aes(x = Employment_Status, y = prop_by_case)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = prop_by_case), vjust = -0.5) +
+  facet_wrap(~ Age) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "Proportion of mental health caseness (%)")
+```
+
+```{r, echo=FALSE}
+obj2_df_l <- all_years %>% filter(year==2009) %>% group_by(Employment_Status, Highest_Edu_Attain, GHQg2) %>% summarise(respondents_by_yr_ec_ghq2 = n())
+obj2_df_s <- all_years %>% group_by(Employment_Status, Highest_Edu_Attain) %>% summarise(respondents_by_econact = n())
+
+obj2_df <- obj2_df_l %>% 
+  left_join(obj2_df_s, by = c("Employment_Status", "Highest_Edu_Attain")) %>%
+  mutate(prop_by_case  = round((respondents_by_yr_ec_ghq2/respondents_by_econact * 100),2)) %>%
+  filter(GHQg2 == "Case Mental Health")
+
+obj2_df %>%
+  ggplot(aes(x = Employment_Status, y = prop_by_case)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = prop_by_case), vjust = -0.5) +
+  facet_wrap(~ Highest_Edu_Attain) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "Proportion of mental health caseness (%)")
+```
+
+
+
+
+# Objective 3
+
+Our aim in this section is to test the relationship between employment status and mental health before and after the 2008 recession. From 2000 to 2008 is pre-recession and beyond that is post-recession.
+
+## Trend test analysis
+
+Below we utilize a logistic regression to assess the relationship between employment status and mental health before and after the 2008 recession. We have used caseness of mental health from the General Health Questionnaire as our measure of mental health.
+
+```{r, echo = F}
+reg_data <- all_years %>% 
+  mutate_if(is.character, as.factor) %>%
+  select(-c(EQMEAN, GHQ36Scr, Int_Weight, Sex, Age, Self_Rated_Health, Highest_Edu_Attain)) %>%
+  na.omit() %>%
+  mutate(GHQg2 = recode(GHQg2, `Case Mental Health` =  1, `No case` = 0)) %>%
+  mutate_if(is.numeric, as.factor)
+
+
+```
+
+## Visualising the change in prevalence of mental health cases between 2008 and 2009
+
+```{r, echo=FALSE}
+total_ghq2_prop %>%
+  filter(year %in% c("2008", "2009")) %>%
+  filter(GHQg2 == "Case Mental Health") %>%
+  ggplot(aes(x = year, y = prop_by_case)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = prop_by_case), position = position_dodge(width = 0.9), vjust = -0.5) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Survey Year", y = "Proportion of caseness (%)", title = "The prevalence of mental health caseness\n grew by close to 3 percentage points\n in 2009 from 2008")
+```
+
+```{r, echo = F}
+model <- glm(GHQg2 ~ Employment_Status + post_2008_indicator, family="binomial", data=reg_data)
+```
+
+### Table 1. Logistic Regression Results for Predicting Response Variable
+
+| Predictor                   | Coefficient | Std. Error | Odds Ratio | Confidence Interval | p-value  |
+|---------------------|----------|-------|-------|------------|-------------|
+| (Intercept)                 | -2.11       | 3.847      | \-         |                     | \<2e-16  |
+| Unemployment                | 0.900       | 0.049      | 2.46       | (2.23, 2.71)        | \<2e-16  |
+| Long-term sick or retired   | 1.256       | 0.030      | 3.51       | (3.31, 3.72)        | \<2e-16  |
+| Other economically inactive | 0.522       | 0.026      | 1.69       | (1.60, 1.77)        | \<2e-16  |
+| Post-2008                   | 0.163       | 0.012      | 1.18       | (1.15, 1.25)        | 4.03e-14 |
+
+#### [Interpretation]{.underline}
+
+Our reference category for the model is the "Employed" group. From the estimates generated for the independent variables we can say the following regarding our sample of respondents.
+
+1\. **Unemployed**: The odds of an individual having a mental health case if they are unemployed os 2.46 times higher compared to the Employed group.
+
+2\. **long-term sick or retired**: The odds of a long-term sick or retired individual (aged between 16-64) having a mental health case is 3.51 times higher compared to the Employed group.
+
+3\. **Other economically inactive**: The odds of an individual identifying as 'Other economically inactive' having a mental health case is 1.69 times higher compared to the Employed group.
+
+4\. **Post-2008 recession:** The odds of an individual from any employed group having a mental health case is 1.18 times higher post-recession compared to the years before the 2008 recession.
+
+#### Assessment of model fit
+
+Given that our objective is to assess the strength of relationship between employment status and mental health, a model that fits our data is not our concern. I have reported the fitness of the model here only for completeness sake. The McFadden score reported below is close to zero which indicates that the variables included in the model (employment status and post-recession indicator) explain little of the variability observed in mental health caseness which is reasonable.
+
+```{r, echo = F, warning=FALSE}
+library(pscl)
+pscl::pR2(model)["McFadden"]
+```
+
+# Methodology
+
+1.  We have an assigned an interview weight of 1 to respondents with no data for their interview weights.
+2.  Using the interview weights of each respondents, we have weighed the numerical variables accordingly.
+
+# Limitations
+
+1.  Health Survey England draws a new sample of respondents every year (see [here](https://academic.oup.com/ije/article/41/6/1585/741862)), however from our review of the survey information, we cannot guarantee that all responds are unique through the years.
+
+# Appendix
+
+1.  Data completeness
+
+See below for the number of missing observations we have for each variable.
+
+```{r, echo = F}
+print(colSums(is.na(all_years)))
+```
+
+2.  Duplicate serial numbers See below for the number of duplicate individual serial numbers
+
+```{r, echo = F}
+print(sum(duplicated(all_years$pserial)))
+```
